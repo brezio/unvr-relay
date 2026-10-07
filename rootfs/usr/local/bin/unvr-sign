@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""
+Mint a signed playback link (for testing; the dashboard does this for real).
+
+    docker exec unvr-relay unvr-sign coop 600 https://cams.example.com
+
+Must match nginx.conf.tmpl: base64url(md5("<exp><stream> <secret>")), no padding.
+"""
+import base64
+import hashlib
+import os
+import sys
+import time
+
+if len(sys.argv) < 2 or not os.environ.get("STREAM_SECRET"):
+    sys.exit("usage: unvr-sign <stream> [ttlSeconds] [baseUrl]   (needs STREAM_SECRET)")
+
+stream = sys.argv[1]
+ttl = int(sys.argv[2]) if len(sys.argv) > 2 else 600
+base = (sys.argv[3] if len(sys.argv) > 3 else "http://localhost:8080").rstrip("/")
+
+exp = int(time.time()) + ttl
+digest = hashlib.md5(f"{exp}{stream} {os.environ['STREAM_SECRET'].strip()}".encode()).digest()
+sig = base64.urlsafe_b64encode(digest).decode().rstrip("=")
+q = f"src={stream}&exp={exp}&sig={sig}"
+
+ws = base.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
+print(f"MP4 (Chrome/Firefox): {base}/api/stream.mp4?{q}")
+print(f"HLS (Safari/iOS):     {base}/api/stream.m3u8?{q}")
+print(f"Still frame:          {base}/api/frame.jpeg?{q}")
+print(f"MSE WebSocket:        {ws}/api/ws?{q}")

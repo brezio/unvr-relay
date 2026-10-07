@@ -1,0 +1,35 @@
+#!/bin/bash
+# Container entrypoint (under tini). Renders config, then runs nginx, go2rtc
+# and -- if TUNNEL_TOKEN is set -- cloudflared. If any of them exits, the rest
+# are stopped and the container exits non-zero, so the restart policy brings
+# the whole relay back rather than leaving it half-alive.
+set -euo pipefail
+
+python3 /usr/local/lib/unvr-relay/generate.py
+
+pids=()
+nginx -e /dev/stderr -c /config/nginx.conf -g 'daemon off;' &
+pids+=($!)
+go2rtc -config /config/go2rtc.yaml &
+pids+=($!)
+
+if [[ -n "${TUNNEL_TOKEN:-}" ]]; then
+  # cloudflared reads TUNNEL_TOKEN from the environment.
+  cloudflared --no-autoupdate tunnel run &
+  pids+=($!)
+  echo "unvr-relay: cloudflared started (bundled tunnel)"
+else
+  echo "unvr-relay: TUNNEL_TOKEN not set; expose port 8080 through your own tunnel/proxy"
+fi
+
+stop() {
+  kill -TERM "${pids[@]}" 2>/dev/null || true
+  wait || true
+}
+trap 'stop; exit 0' TERM INT
+
+code=0
+wait -n "${pids[@]}" || code=$?
+echo "unvr-relay: a process exited (status ${code}); stopping the others" >&2
+stop
+exit 1

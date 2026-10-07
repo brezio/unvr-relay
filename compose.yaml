@@ -1,0 +1,25 @@
+# Example deployment. Run on a box on the same LAN as the UniFi console.
+#
+#   cp .env.example .env    # fill it in
+#   docker compose up -d
+#
+# With TUNNEL_TOKEN set, the bundled cloudflared is the only way in and no
+# port needs publishing. Without it, uncomment `ports` and point your own
+# tunnel or reverse proxy at :8080.
+
+services:
+  unvr-relay:
+    image: ghcr.io/brezio/unvr-relay:latest
+    container_name: unvr-relay
+    env_file: .env
+    # ports:
+    #   - "8080:8080"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /config:uid=10001,gid=10001,mode=0700
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

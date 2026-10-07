@@ -1,0 +1,3 @@
+# Holds the tunnel token, an admin-scoped UniFi API key and the stream secret.
+.env
+.DS_Store
