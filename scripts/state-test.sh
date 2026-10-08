@@ -13,6 +13,9 @@ trap 'rm -rf "$CERTS"' EXIT
 # Throwaway certificate for the fake console (the real one is self-signed too).
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=console.test \
   -keyout "$CERTS/key.pem" -out "$CERTS/cert.pem" >/dev/null 2>&1
+# The container runs as uid 10001. mktemp -d is 0700 and owned by the runner,
+# which Docker Desktop ignores but Linux enforces (CI failed exactly here).
+chmod 755 "$CERTS"
 chmod 644 "$CERTS"/*.pem
 
 docker run --rm \
