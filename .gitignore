@@ -1,3 +1,6 @@
-# Holds the tunnel token, an admin-scoped UniFi API key and the stream secret.
+# Hold the tunnel token, an admin-scoped UniFi API key and the stream secret.
+# Public repo: every env file except the example stays local.
 .env
+.env.*
+!.env.example
 .DS_Store
