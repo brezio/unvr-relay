@@ -37,6 +37,9 @@ jobs:
       - name: Smoke test
         run: scripts/smoke-test.sh unvr-relay:smoke
 
+      - name: State service test
+        run: scripts/state-test.sh unvr-relay:smoke
+
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@v6

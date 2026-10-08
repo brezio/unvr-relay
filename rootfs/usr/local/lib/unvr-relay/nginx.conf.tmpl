@@ -79,6 +79,29 @@ http {
             proxy_buffering off;
         }
 
+        # Live device state for browsers (read-only WebSocket) and the narrow
+        # Protect API proxy for the dashboard server. Both are served by
+        # unvr-state on loopback, which checks its own HMAC tokens, the
+        # Origin and the allowlists; nginx only routes. 502 when unvr-state is
+        # not running (UNIFI_LOCAL_* unset).
+        location = /api/state {
+            proxy_pass http://127.0.0.1:8090/state$is_args$args;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Origin $http_origin;
+            proxy_buffering off;
+            proxy_read_timeout 1h;
+        }
+
+        location /api/protect/ {
+            proxy_pass http://127.0.0.1:8090/protect/;
+            proxy_http_version 1.1;
+            client_max_body_size 8k;
+            proxy_buffering off;
+            proxy_read_timeout 20s;
+        }
+
         location / {
             return 404;
         }

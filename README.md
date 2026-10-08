@@ -83,6 +83,76 @@ const url = `https://cams.example.com/api/stream.mp4?src=${stream}&exp=${exp}&si
 - MD5 is what `secure_link` supports. With a 256-bit secret, the attacks that
   matter (forging a link, or recovering the key) are not practical.
 
+## Live device state and the Protect API proxy
+
+Optional. With `UNIFI_LOCAL_HOST` + `UNIFI_LOCAL_API_KEY` set, a fourth
+process, **unvr-state** (`rootfs/usr/local/lib/unvr-relay/state.py`), talks to
+the console's **local** Protect Integration API -- never api.ui.com, so none of
+it counts against the cloud connector's rate limit -- and serves two routes
+through the same nginx and tunnel:
+
+| Route | For | Auth |
+| --- | --- | --- |
+| `GET /api/state` (WebSocket) | browsers | `?exp=&sig=` token + `Origin` in `STATE_ORIGINS` |
+| `/api/protect/<path>` | the dashboard **server** | per-request HMAC headers |
+
+**How state stays current.** It reads every device in `RELAY_DEVICES` at
+start, on every reconnect and every 30 s, and holds Protect's
+`/v1/subscribe/devices` stream open in between. Observed on Protect 7.2.105:
+the stream carries every device on the console, updates are partial (changed
+fields only), and the same update can arrive twice about 2 s apart. So
+updates are filtered to the allowlist, deep-merged into the last full read,
+and de-duplicated; a relay output change reaches browsers within about 2 s.
+
+**`/api/state` protocol.** Server to browser only; anything a browser sends is
+ignored.
+
+```
+{"type":"snapshot","live":true,"at":<ms>,"devices":[{kind,id,present,...},...]}
+{"type":"device","device":{kind,id,present,...}}
+{"type":"health","live":false,"at":<ms>}          every 10 s, and on change
+```
+
+`live` is false while the upstream stream is down or no full read has
+succeeded for 90 s. A client must stop trusting the feed then, not keep
+showing the last state. Devices carry only the fields a dashboard reads
+(outputs, inputs, connection state, signal quality, light on/forced/mode,
+sensor stats and battery); MAC, GUID and everything else stay on the LAN.
+
+**Tokens.**
+
+```
+state:  sig = base64url(HMAC-SHA256(STREAM_SECRET, "unvr-state:v1:<exp>"))
+api:    X-Relay-Exp: <exp>   X-Relay-Sig: base64url(HMAC-SHA256(STREAM_SECRET,
+          "unvr-api:v1\n<METHOD>\n<path>\n<exp>\n<sha256 hex of body>"))
+```
+
+A state token may live at most 1 h, and the socket is closed with code 4001
+when it expires, so the page reconnects with a fresh one and a rotated secret
+takes effect within one token lifetime. An API signature is valid for 60 s
+and covers the body, so it cannot be moved to another call. Both are
+HMAC-SHA256 with their own prefixes, so neither can be turned into a video
+link (MD5, different message) or into each other.
+
+**What the proxy allows.** Only these calls, only on ids in `RELAY_DEVICES`:
+
+| Method | Path | Body |
+| --- | --- | --- |
+| GET | `/meta/info`, `/relays`, `/relays/<id>` | |
+| POST | `/relays/<id>/outputs/<n>/activate` | `{"state":"on"\|"off"[,"pulseDuration":ms]}` -- an explicit state, never a toggle |
+| GET, PATCH | `/lights/<id>` | PATCH: exactly `{"isLightForceEnabled":bool}` |
+| GET | `/sensors/<id>`, `/cameras/<id>/snapshot` | |
+
+`GET /relays` is filtered to the allowlisted relays and JSON responses are
+trimmed like the state feed. Query strings are refused. A failure of the relay
+itself (console unreachable) is a 502 with `X-Relay-Error: 1`; the console's
+own errors pass through unmarked, so a caller can tell "fall back to the
+cloud" from "the console said no".
+
+**Not covered:** the console's certificate is self-signed and not verified
+unless `UNIFI_LOCAL_CERT_SHA256` pins it. On a LAN you trust that is a small
+risk, but it is the API key on the wire.
+
 ## Security
 
 | Layer | What it does |
@@ -93,7 +163,9 @@ const url = `https://cams.example.com/api/stream.mp4?src=${stream}&exp=${exp}&si
 | container | Runs as uid 10001. The example compose adds `read_only`, `cap_drop: ALL` and `no-new-privileges` |
 
 `scripts/smoke-test.sh` checks the gate, the uid and loopback binding against a
-synthetic stream. CI runs it before pushing.
+synthetic stream. `scripts/state-test.sh` checks unvr-state's auth, filtering,
+merging and proxy allowlist against a fake console. CI runs both before
+pushing.
 
 ## Gotchas
 
@@ -105,12 +177,18 @@ synthetic stream. CI runs it before pushing.
   but lags several seconds.
 - **RTSPS tokens rotate** if RTSPS is disabled and re-enabled in Protect.
   Restart the container to pick up the new URLs.
-- **If one process dies, the container exits.** That covers nginx, go2rtc and
-  cloudflared, and lets the restart policy bring the whole relay back.
+- **If one process dies, the container exits.** That covers nginx, go2rtc,
+  cloudflared and unvr-state, and lets the restart policy bring the whole
+  relay back. A bad `RELAY_DEVICES` or missing `STATE_ORIGINS` therefore stops
+  video too -- deliberately: it fails at start, loudly, not silently later.
+- **Two pythons in the image.** go2rtc's base image puts its own python 3.13
+  first on `PATH`; Alpine's `py3-aiohttp` is installed for `/usr/bin/python3`
+  only. unvr-state is started with the latter explicitly.
 
 ## Development
 
 ```bash
 docker build -t unvr-relay:dev .
 scripts/smoke-test.sh unvr-relay:dev
+scripts/state-test.sh unvr-relay:dev
 ```

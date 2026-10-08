@@ -13,6 +13,16 @@ pids+=($!)
 go2rtc -config /config/go2rtc.yaml &
 pids+=($!)
 
+# Live state + Protect API proxy, only when the local Protect API is configured.
+if [[ -n "${UNIFI_LOCAL_HOST:-}" && -n "${UNIFI_LOCAL_API_KEY:-}" ]]; then
+  # Alpine's python, not the go2rtc image's /usr/local one: py3-aiohttp is
+  # installed for /usr/bin/python3 only.
+  /usr/bin/python3 /usr/local/lib/unvr-relay/state.py &
+  pids+=($!)
+else
+  echo "unvr-relay: UNIFI_LOCAL_HOST/UNIFI_LOCAL_API_KEY not set; /api/state and /api/protect disabled"
+fi
+
 if [[ -n "${TUNNEL_TOKEN:-}" ]]; then
   # cloudflared reads TUNNEL_TOKEN from the environment.
   cloudflared --no-autoupdate tunnel run &

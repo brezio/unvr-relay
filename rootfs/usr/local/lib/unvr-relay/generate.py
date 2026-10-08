@@ -14,6 +14,7 @@ logged.
 import json
 import os
 import re
+import ssl
 import sys
 import time
 import urllib.error
@@ -44,16 +45,35 @@ def env(name, default=""):
 
 
 class Protect:
-    """Minimal Protect Integration API client over the UniFi cloud Connector."""
+    """
+    Minimal Protect Integration API client.
 
-    def __init__(self, api_key, host_id):
-        # HOST_ID must keep its ":<digits>" suffix -- the bare form 403s.
-        self.base = (
-            "https://api.ui.com/v1/connector/consoles/"
-            + urllib.parse.quote(host_id, safe="")
-            + "/proxy/protect/integration/v1"
-        )
-        self.key = api_key
+    Local (console LAN address + a Protect integration key) when
+    UNIFI_LOCAL_HOST/UNIFI_LOCAL_API_KEY are set, so a restart does not depend
+    on -- or spend -- the cloud connector's rate limit. Otherwise the UniFi
+    cloud Connector with the Site Manager key.
+    """
+
+    def __init__(self):
+        self.context = None
+        if env("UNIFI_LOCAL_HOST") and env("UNIFI_LOCAL_API_KEY"):
+            self.base = f"https://{env('UNIFI_LOCAL_HOST')}/proxy/protect/integration/v1"
+            self.key = env("UNIFI_LOCAL_API_KEY")
+            # The console's certificate is self-signed. unvr-state can pin it
+            # (UNIFI_LOCAL_CERT_SHA256); this one-shot boot lookup does not.
+            self.context = ssl.create_default_context()
+            self.context.check_hostname = False
+            self.context.verify_mode = ssl.CERT_NONE
+            log("Protect API: local console")
+        else:
+            # HOST_ID must keep its ":<digits>" suffix -- the bare form 403s.
+            self.base = (
+                "https://api.ui.com/v1/connector/consoles/"
+                + urllib.parse.quote(env("UNIFI_HOST_ID"), safe="")
+                + "/proxy/protect/integration/v1"
+            )
+            self.key = env("UNIFI_API_KEY")
+            log("Protect API: cloud connector")
 
     def call(self, path, method="GET", body=None):
         data = None if body is None else json.dumps(body).encode()
@@ -67,7 +87,7 @@ class Protect:
         # not be up yet, and a 429 means UniFi is throttling the key.
         for attempt in range(6):
             try:
-                with urllib.request.urlopen(req, timeout=20) as res:
+                with urllib.request.urlopen(req, timeout=20, context=self.context) as res:
                     return json.loads(res.read())
             except urllib.error.HTTPError as e:
                 text = e.read().decode(errors="replace")[:200]
@@ -86,9 +106,9 @@ def protect_streams():
     spec = env("RELAY_CAMERAS")
     if not spec:
         return []
-    for k in ("UNIFI_API_KEY", "UNIFI_HOST_ID"):
-        if not env(k):
-            die(f"{k} is required when RELAY_CAMERAS is set")
+    local = env("UNIFI_LOCAL_HOST") and env("UNIFI_LOCAL_API_KEY")
+    if not local and not (env("UNIFI_API_KEY") and env("UNIFI_HOST_ID")):
+        die("RELAY_CAMERAS needs UNIFI_LOCAL_HOST + UNIFI_LOCAL_API_KEY, or UNIFI_API_KEY + UNIFI_HOST_ID")
 
     quality = env("RTSPS_QUALITY", "medium")
     if quality not in QUALITIES:
@@ -102,7 +122,7 @@ def protect_streams():
     audio = TRUE.match(env("RELAY_AUDIO", "false")) is not None
     media = "" if audio else "#media=video"
     log(f"audio {'ENABLED (RELAY_AUDIO=true)' if audio else 'off (set RELAY_AUDIO=true to enable)'}")
-    api = Protect(env("UNIFI_API_KEY"), env("UNIFI_HOST_ID"))
+    api = Protect()
 
     streams = []
     # RELAY_CAMERAS=<cameraId>:<streamName>,...

@@ -12,7 +12,7 @@ FROM alexxit/go2rtc:${GO2RTC_VERSION}
 
 # go2rtc's image is Alpine and already has python3, bash and tini.
 # Alpine's nginx is built --with-http_secure_link_module (checked on 1.28.3).
-RUN apk add --no-cache nginx \
+RUN apk add --no-cache nginx py3-aiohttp \
  && addgroup -S -g 10001 relay \
  && adduser -S -D -H -u 10001 -G relay relay \
  && mkdir -p /config \
