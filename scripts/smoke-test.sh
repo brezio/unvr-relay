@@ -43,6 +43,8 @@ check "expired"                       410 "$(code "$B/api/frame.jpeg?$(sign test
 check "non-name src"                  400 "$(code "$B/api/frame.jpeg?src=exec:id&exp=1&sig=x")"
 check "go2rtc admin path"             404 "$(code "$B/api/streams")"
 check "root"                          404 "$(code "$B/")"
+check "no-store on stream responses"  no-store "$(curl -s -m 8 -o /dev/null -D - "$B/api/frame.jpeg?$GOOD" | tr -d '\r' | sed -n 's/^[Cc]ache-[Cc]ontrol: //p')"
+check "no-store on Safari redirect"   "301 no-store" "$(curl -s -m 8 -o /dev/null -D - -A 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15' "$B/api/stream.mp4?$GOOD" | tr -d '\r' | awk 'NR==1{c=$2} tolower($1)=="cache-control:"{v=$2} END{print c, v}')"
 check "websocket upgrade (signed)"    101 "$(curl -s -m 4 -o /dev/null -w '%{http_code}' -N \
   -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
   -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$B/api/ws?$GOOD" || true)"

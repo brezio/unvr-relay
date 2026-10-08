@@ -37,6 +37,17 @@ http {
     server {
         listen 8080;
 
+        # Nothing here may be cached by a CDN in front (Cloudflare caches 301s
+        # and .mp4/.jpeg/.ts by default). Observed 2026-10-07: go2rtc answers a
+        # Safari user-agent's stream.mp4 with a 301 to HLS; Cloudflare cached it
+        # per signed URL, so a Chrome viewer holding the SAME link (two page
+        # loads in the same second sign identically) was sent to HLS and its
+        # player died. `always` covers redirects and errors too.
+        # go2rtc sets its own "Cache-Control: no-cache" on some responses, which
+        # a CDN may still store (and revalidate). Replace it, never stack it.
+        proxy_hide_header Cache-Control;
+        add_header Cache-Control "no-store" always;
+
         location = /healthz {
             default_type text/plain;
             return 200 "ok\n";
