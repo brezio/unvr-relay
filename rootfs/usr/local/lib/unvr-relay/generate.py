@@ -27,6 +27,7 @@ QUALITIES = ("high", "medium", "low")
 NAME_OK = re.compile(r"^[a-z0-9_-]+$")
 ID_OK = re.compile(r"^[A-Za-z0-9_-]+$")
 FALSE = re.compile(r"^(0|false|no|off)$", re.I)
+TRUE = re.compile(r"^(1|true|yes|on)$", re.I)
 
 
 def die(msg):
@@ -94,6 +95,13 @@ def protect_streams():
         die(f"RTSPS_QUALITY must be one of {', '.join(QUALITIES)}")
     may_enable = not FALSE.match(env("UNIFI_ENABLE_RTSPS", "true"))
     host_override = env("RTSPS_HOST")
+    # Audio is OFF unless explicitly enabled. "#media=video" makes go2rtc
+    # request only the video track from the camera, so audio never leaves the
+    # console -- whatever a viewer's link asks for. Verified on go2rtc 1.9.14:
+    # same source, mp4a present without the filter, absent with it.
+    audio = TRUE.match(env("RELAY_AUDIO", "false")) is not None
+    media = "" if audio else "#media=video"
+    log(f"audio {'ENABLED (RELAY_AUDIO=true)' if audio else 'off (set RELAY_AUDIO=true to enable)'}")
     api = Protect(env("UNIFI_API_KEY"), env("UNIFI_HOST_ID"))
 
     streams = []
@@ -120,13 +128,19 @@ def protect_streams():
         u = urllib.parse.urlsplit(urls[quality])
         host = host_override or u.hostname
         port = u.port or 7441
-        streams.append((name, f"rtspx://{host}:{port}{u.path}"))
-        log(f"{name}: rtspx://{host}:{port}/<token redacted>")
+        streams.append((name, f"rtspx://{host}:{port}{u.path}{media}"))
+        log(f"{name}: rtspx://{host}:{port}/<token redacted>{media}")
     return streams
 
 
 def static_streams():
-    """RELAY_STREAMS=<name>=<go2rtc source>;... for non-Protect sources."""
+    """
+    RELAY_STREAMS=<name>=<go2rtc source>;... for non-Protect sources.
+
+    Passed to go2rtc verbatim: RELAY_AUDIO does not apply here, since a
+    "#media=video" suffix is only valid on some source types. Add it yourself
+    to an rtsp/rtspx source to drop audio.
+    """
     out = []
     for entry in [s.strip() for s in env("RELAY_STREAMS").split(";") if s.strip()]:
         name, sep, source = (p.strip() for p in entry.partition("="))

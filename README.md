@@ -53,6 +53,7 @@ Open the MP4 link in Chrome or Firefox, or the HLS link in Safari.
 | `RTSPS_QUALITY` | | `high` / `medium` (default) / `low` |
 | `UNIFI_ENABLE_RTSPS` | | `true` (default) turns RTSPS on in Protect if it is off |
 | `RTSPS_HOST` | | Override the console address in RTSPS URLs |
+| `RELAY_AUDIO` | | **Off by default.** `true` relays camera audio. Off means go2rtc pulls only the video track, so audio never leaves the console, whatever a link asks for. Applies to `RELAY_CAMERAS`; `RELAY_STREAMS` are passed verbatim |
 | `TUNNEL_TOKEN` | | Run the bundled cloudflared. Public hostname service: `http://localhost:8080` |
 
 ## Signed links
@@ -88,6 +89,7 @@ const url = `https://cams.example.com/api/stream.mp4?src=${stream}&exp=${exp}&si
 | --- | --- |
 | nginx gate | Rejects unsigned (403), expired (410) and non-name (400) requests. Everything else is 404 |
 | go2rtc | `allow_paths` restricts the API to playback endpoints. API and RTSP are on loopback. WebRTC is off |
+| audio | Off unless `RELAY_AUDIO=true`. The camera's audio track is never pulled (`#media=video`). CI checks the filter against a control that has audio |
 | container | Runs as uid 10001. The example compose adds `read_only`, `cap_drop: ALL` and `no-new-privileges` |
 
 `scripts/smoke-test.sh` checks the gate, the uid and loopback binding against a
